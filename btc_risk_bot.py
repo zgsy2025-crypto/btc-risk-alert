@@ -214,6 +214,8 @@ def main() -> None:
     print(f"Running BTC risk check for {SYMBOL}")
 
     try:
+        send_telegram("✅ BTC Risk Alert 테스트 성공! GitHub Actions와 Telegram 연결 정상")
+        
         alerts = check_signals()
 
         if not alerts:
