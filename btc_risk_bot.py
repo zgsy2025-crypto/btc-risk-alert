@@ -11,7 +11,7 @@ SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
 BINANCE_BASE = "https://api.binance.com"
 
 THRESHOLDS = {
-    "move_5m_pct": 1.2,
+    "move_5m_pct": 0.05,
     "move_15m_pct": 2.0,
     "move_60m_pct": 3.5,
     "volume_spike_mult": 2.5,
