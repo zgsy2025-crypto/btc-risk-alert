@@ -1,25 +1,15 @@
 import os
-import time
-import json
-import math
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 
-BYBIT_BASE = "https://api.bybit.com"
-STATE_FILE = "alert_state.json"
-COOLDOWN_SECONDS = 15 * 60  # 같은 종류 알림은 15분 쿨다운
+BINANCE_BASE = "https://api.binance.com"
 
-# ----- 보수적 기본값: 너무 민감하면 알림 피로가 생깁니다. -----
 THRESHOLDS = {
     "move_5m_pct": 1.2,
     "move_15m_pct": 2.0,
@@ -35,40 +25,31 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def load_state() -> Dict[str, Any]:
-    if not os.path.exists(STATE_FILE):
-        return {}
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+def send_telegram(text: str) -> None:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[WARN] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 비어 있습니다.")
+        print(text)
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    r = requests.post(url, json=payload, timeout=10)
+    r.raise_for_status()
 
 
-def save_state(state: Dict[str, Any]) -> None:
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
-
-def should_alert(key: str, state: Dict[str, Any]) -> bool:
-    last = state.get(key, 0)
-    return time.time() - last >= COOLDOWN_SECONDS
-
-
-def mark_alerted(key: str, state: Dict[str, Any]) -> None:
-    state[key] = time.time()
-
-
-def bybit_kline(symbol: str, interval: str, limit: int = 200) -> List[Dict[str, float]]:
-    """Bybit v5 public kline. Returns candles oldest -> newest."""
-    url = f"{BYBIT_BASE}/v5/market/kline"
-    params = {"category": "linear", "symbol": symbol, "interval": interval, "limit": limit}
+def kline(symbol: str, interval: str, limit: int = 200) -> List[Dict[str, float]]:
+    """Binance public kline. Returns candles oldest -> newest."""
+    url = f"{BINANCE_BASE}/api/v3/klines"
+    params = {"symbol": symbol.upper(), "interval": interval, "limit": limit}
     r = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
-    data = r.json()
-    if data.get("retCode") != 0:
-        raise RuntimeError(f"Bybit error: {data}")
-    rows = data["result"]["list"]
+    rows = r.json()
+
     candles = []
     for row in rows:
         candles.append({
@@ -78,9 +59,8 @@ def bybit_kline(symbol: str, interval: str, limit: int = 200) -> List[Dict[str, 
             "low": float(row[3]),
             "close": float(row[4]),
             "volume": float(row[5]),
-            "turnover": float(row[6]),
         })
-    return list(reversed(candles))
+    return candles
 
 
 def pct_change(old: float, new: float) -> float:
@@ -102,39 +82,28 @@ def ema(values: List[float], period: int) -> Optional[float]:
 def rsi(values: List[float], period: int = 14) -> Optional[float]:
     if len(values) < period + 1:
         return None
+
     gains, losses = [], []
     for i in range(1, period + 1):
         diff = values[i] - values[i - 1]
         gains.append(max(diff, 0))
         losses.append(abs(min(diff, 0)))
+
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
+
     for i in range(period + 1, len(values)):
         diff = values[i] - values[i - 1]
         gain = max(diff, 0)
         loss = abs(min(diff, 0))
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
+
     if avg_loss == 0:
         return 100.0
+
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
-
-
-def send_telegram(text: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[WARN] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 비어 있습니다.")
-        print(text)
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    r = requests.post(url, json=payload, timeout=10)
-    r.raise_for_status()
 
 
 def fmt_price(x: float) -> str:
@@ -142,12 +111,17 @@ def fmt_price(x: float) -> str:
 
 
 def make_alert(title: str, body: str, level: str = "⚠️") -> str:
-    return f"{level} <b>{title}</b>\n\n{body}\n\n시간: {now_utc()}\n원칙: 이 알림은 진입 지시가 아니라 리스크 확인 신호입니다."
+    return (
+        f"{level} <b>{title}</b>\n\n"
+        f"{body}\n\n"
+        f"시간: {now_utc()}\n"
+        f"원칙: 이 알림은 진입 지시가 아니라 리스크 확인 신호입니다."
+    )
 
 
 def check_signals() -> List[tuple[str, str]]:
-    candles_1m = bybit_kline(SYMBOL, "1", 120)
-    candles_1h = bybit_kline(SYMBOL, "60", 220)
+    candles_1m = kline(SYMBOL, "1m", 120)
+    candles_1h = kline(SYMBOL, "1h", 220)
 
     closes_1m = [c["close"] for c in candles_1m]
     volumes_1m = [c["volume"] for c in candles_1m]
@@ -156,7 +130,6 @@ def check_signals() -> List[tuple[str, str]]:
     last = closes_1m[-1]
     alerts: List[tuple[str, str]] = []
 
-    # 1) 급등락 감시
     windows = [(5, "move_5m_pct"), (15, "move_15m_pct"), (60, "move_60m_pct")]
     for minutes, key in windows:
         if len(closes_1m) > minutes:
@@ -172,7 +145,6 @@ def check_signals() -> List[tuple[str, str]]:
                 )
                 alerts.append((f"{key}_{'up' if chg > 0 else 'down'}", make_alert(title, body)))
 
-    # 2) 거래량 폭증
     if len(volumes_1m) >= 25:
         avg20 = sum(volumes_1m[-21:-1]) / 20
         latest_vol = volumes_1m[-1]
@@ -186,9 +158,9 @@ def check_signals() -> List[tuple[str, str]]:
             )
             alerts.append(("volume_spike", make_alert(title, body)))
 
-    # 3) RSI 과열/공포
     rsi_1h = rsi(closes_1h, 14)
     ema200_1h = ema(closes_1h, 200)
+
     if rsi_1h is not None:
         if rsi_1h >= THRESHOLDS["rsi_hot"]:
             title = "BTC 1시간 RSI 과열권"
@@ -208,7 +180,6 @@ def check_signals() -> List[tuple[str, str]]:
             )
             alerts.append(("rsi_cold", make_alert(title, body, "🟡")))
 
-    # 4) 1시간 EMA200 추세 위험
     if ema200_1h is not None and rsi_1h is not None:
         if last < ema200_1h and rsi_1h < THRESHOLDS["trend_risk_rsi"]:
             title = "BTC 중기 추세 위험 신호"
@@ -224,31 +195,36 @@ def check_signals() -> List[tuple[str, str]]:
 
 
 def main() -> None:
-    print(f"Starting BTC risk bot for {SYMBOL}. Poll: {POLL_SECONDS}s")
-    state = load_state()
-    send_telegram(make_alert("BTC 위험 알림봇 시작", f"감시 대상: <b>{SYMBOL}</b>\n주문 기능 없음. 알림 전용입니다.", "✅"))
+    print(f"Running BTC risk check for {SYMBOL}")
 
-    while True:
+    try:
+        send_telegram("✅ BTC Risk Alert 테스트 성공! GitHub Actions와 Telegram 연결 정상")
+
+        alerts = check_signals()
+
+        if not alerts:
+            print("No alert signals.")
+            return
+
+        sent_keys = set()
+        for key, msg in alerts:
+            if key in sent_keys:
+                continue
+            send_telegram(msg)
+            sent_keys.add(key)
+            print(f"Sent alert: {key}")
+
+    except Exception as e:
+        err = make_alert(
+            "봇 오류 발생",
+            f"오류 내용: <code>{str(e)}</code>",
+            "⚠️"
+        )
+        print(err)
         try:
-            alerts = check_signals()
-            for key, msg in alerts:
-                if should_alert(key, state):
-                    send_telegram(msg)
-                    mark_alerted(key, state)
-                    save_state(state)
-                    print(f"Sent alert: {key}")
-            time.sleep(POLL_SECONDS)
-        except KeyboardInterrupt:
-            print("Stopped by user.")
-            break
-        except Exception as e:
-            err = make_alert("봇 오류 발생", f"오류 내용: <code>{str(e)}</code>\n60초 후 재시도합니다.", "⚠️")
-            print(err)
-            try:
-                send_telegram(err)
-            except Exception:
-                pass
-            time.sleep(60)
+            send_telegram(err)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
