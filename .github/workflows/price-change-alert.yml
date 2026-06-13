@@ -1,6 +1,8 @@
 name: Price Change Alert
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       threshold_5m:
@@ -51,11 +53,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BTC_ALERT_CURRENCY: "usd"
-          BTC_ALERT_THRESHOLD_5M: ${{ inputs.threshold_5m }}
-          BTC_ALERT_THRESHOLD_15M: ${{ inputs.threshold_15m }}
-          BTC_ALERT_THRESHOLD_1H: ${{ inputs.threshold_1h }}
-          BTC_ALERT_VOLUME_MULTIPLIER: ${{ inputs.volume_multiplier }}
-          BTC_ALERT_RSI_OVERBOUGHT: ${{ inputs.rsi_overbought }}
-          BTC_ALERT_RSI_OVERSOLD: ${{ inputs.rsi_oversold }}
-          BTC_ALERT_NOTIFY_NO_ALERT: ${{ inputs.notify_no_alert }}
+          BTC_ALERT_THRESHOLD_5M: ${{ github.event.inputs.threshold_5m || '1.5' }}
+          BTC_ALERT_THRESHOLD_15M: ${{ github.event.inputs.threshold_15m || '2.5' }}
+          BTC_ALERT_THRESHOLD_1H: ${{ github.event.inputs.threshold_1h || '4.0' }}
+          BTC_ALERT_VOLUME_MULTIPLIER: ${{ github.event.inputs.volume_multiplier || '3.0' }}
+          BTC_ALERT_RSI_OVERBOUGHT: ${{ github.event.inputs.rsi_overbought || '70' }}
+          BTC_ALERT_RSI_OVERSOLD: ${{ github.event.inputs.rsi_oversold || '30' }}
+          BTC_ALERT_NOTIFY_NO_ALERT: ${{ github.event.inputs.notify_no_alert || 'true' }}
         run: python scripts/price_change_alert.py
