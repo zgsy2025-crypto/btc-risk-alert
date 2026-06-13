@@ -19,6 +19,14 @@ on:
         description: "Volume spike multiplier threshold"
         required: true
         default: "3.0"
+      rsi_overbought:
+        description: "RSI overbought warning threshold"
+        required: true
+        default: "70"
+      rsi_oversold:
+        description: "RSI oversold warning threshold"
+        required: true
+        default: "30"
       notify_no_alert:
         description: "Send Telegram message even when no risk threshold is crossed"
         required: true
@@ -47,5 +55,7 @@ jobs:
           BTC_ALERT_THRESHOLD_15M: ${{ inputs.threshold_15m }}
           BTC_ALERT_THRESHOLD_1H: ${{ inputs.threshold_1h }}
           BTC_ALERT_VOLUME_MULTIPLIER: ${{ inputs.volume_multiplier }}
+          BTC_ALERT_RSI_OVERBOUGHT: ${{ inputs.rsi_overbought }}
+          BTC_ALERT_RSI_OVERSOLD: ${{ inputs.rsi_oversold }}
           BTC_ALERT_NOTIFY_NO_ALERT: ${{ inputs.notify_no_alert }}
         run: python scripts/price_change_alert.py
