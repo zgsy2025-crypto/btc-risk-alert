@@ -15,6 +15,10 @@ on:
         description: "1-hour move threshold percent"
         required: true
         default: "4.0"
+      volume_multiplier:
+        description: "Volume spike multiplier threshold"
+        required: true
+        default: "3.0"
       notify_no_alert:
         description: "Send Telegram message even when no risk threshold is crossed"
         required: true
@@ -42,5 +46,6 @@ jobs:
           BTC_ALERT_THRESHOLD_5M: ${{ inputs.threshold_5m }}
           BTC_ALERT_THRESHOLD_15M: ${{ inputs.threshold_15m }}
           BTC_ALERT_THRESHOLD_1H: ${{ inputs.threshold_1h }}
+          BTC_ALERT_VOLUME_MULTIPLIER: ${{ inputs.volume_multiplier }}
           BTC_ALERT_NOTIFY_NO_ALERT: ${{ inputs.notify_no_alert }}
         run: python scripts/price_change_alert.py
