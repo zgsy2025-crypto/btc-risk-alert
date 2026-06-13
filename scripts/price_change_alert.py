@@ -64,6 +64,38 @@ def latest_volume_ratio(volumes):
     return latest_volume / average_volume
 
 
+def calculate_rsi(prices, period=14):
+    close_prices = [float(point[1]) for point in prices]
+    if len(close_prices) <= period:
+        raise RuntimeError(f"Not enough price data for RSI: {len(close_prices)}")
+
+    changes = [
+        close_prices[index] - close_prices[index - 1]
+        for index in range(len(close_prices) - period, len(close_prices))
+    ]
+    gains = [change for change in changes if change > 0]
+    losses = [-change for change in changes if change < 0]
+    average_gain = sum(gains) / period
+    average_loss = sum(losses) / period
+
+    if average_loss == 0:
+        return 100.0
+    relative_strength = average_gain / average_loss
+    return 100 - (100 / (1 + relative_strength))
+
+
+def calculate_ema(prices, period=200):
+    close_prices = [float(point[1]) for point in prices]
+    if len(close_prices) < period:
+        raise RuntimeError(f"Not enough price data for EMA{period}: {len(close_prices)}")
+
+    ema = sum(close_prices[:period]) / period
+    multiplier = 2 / (period + 1)
+    for price in close_prices[period:]:
+        ema = (price - ema) * multiplier + ema
+    return ema
+
+
 def send_telegram(message):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -90,6 +122,8 @@ def main():
     currency = os.getenv("BTC_ALERT_CURRENCY", "usd")
     notify_no_alert = env_bool("BTC_ALERT_NOTIFY_NO_ALERT", False)
     volume_threshold = env_float("BTC_ALERT_VOLUME_MULTIPLIER", 3.0)
+    rsi_overbought = env_float("BTC_ALERT_RSI_OVERBOUGHT", 70.0)
+    rsi_oversold = env_float("BTC_ALERT_RSI_OVERSOLD", 30.0)
     thresholds = {
         "5분": env_float("BTC_ALERT_THRESHOLD_5M", 1.5),
         "15분": env_float("BTC_ALERT_THRESHOLD_15M", 2.5),
@@ -121,6 +155,27 @@ def main():
         status_lines.append(f"{volume_line} - 이상 증가 감지")
     else:
         status_lines.append(f"{volume_line} - 기준 미만")
+
+    rsi = calculate_rsi(prices)
+    print(f"[price-change] rsi14={rsi:.2f}", flush=True)
+    rsi_line = f"RSI 14 점검: {rsi:.2f} (주의 기준 {rsi_oversold:.0f} 이하 또는 {rsi_overbought:.0f} 이상)"
+    if rsi >= rsi_overbought:
+        risk_lines.append(f"{rsi_line} - 과열 구간 주의")
+        status_lines.append(f"{rsi_line} - 과열 구간 주의")
+    elif rsi <= rsi_oversold:
+        risk_lines.append(f"{rsi_line} - 급격한 약세/공포 구간 주의")
+        status_lines.append(f"{rsi_line} - 급격한 약세/공포 구간 주의")
+    else:
+        status_lines.append(f"{rsi_line} - 기준 범위")
+
+    ema200 = calculate_ema(prices)
+    print(f"[price-change] ema200={ema200:.2f}", flush=True)
+    ema_line = f"EMA200 점검: {ema200:,.2f} {currency.upper()}"
+    if latest_price < ema200:
+        risk_lines.append(f"{ema_line} - 현재가가 EMA200 아래")
+        status_lines.append(f"{ema_line} - 현재가가 EMA200 아래")
+    else:
+        status_lines.append(f"{ema_line} - 현재가가 EMA200 위")
 
     if not status_lines:
         status_lines.append("가격 급등락 기준 초과 없음")
